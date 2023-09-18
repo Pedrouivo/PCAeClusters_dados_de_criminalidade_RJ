@@ -1,0 +1,328 @@
+## Análises exploratórias de Dados da criminalidade no RJ
+## disponível em https://www.ispdados.rj.gov.br/estatistica.html
+## Estatísticas de segurança: série histórica mensal por município desde 2014
+
+basecrimesRJ <- read_delim("BaseMunicipioMensal.csv", 
+                           delim = ";", escape_double = FALSE, locale = locale(encoding = "ISO-8859-1"), 
+                           trim_ws = TRUE)
+
+basecrimesRJ2 <-  basecrimesRJ %>% 
+  mutate(policiais_mortos = pol_militares_mortos_serv + pol_civis_mortos_serv) %>% 
+  select(everything(), -c(fmun_cod,cvli, letalidade_violenta, total_roubos, furto_transeunte, 
+                          furto_coletivo, furto_bicicleta, total_furtos, apreensao_drogas, 
+                          posse_drogas,recuperacao_veiculos, roubo_em_coletivo, roubo_carga, roubo_bicicleta,
+                          apreensao_drogas_sem_autor, recuperacao_veiculos, outros_furtos,
+                          apf, aaapai, cmp, cmba, pessoas_desaparecidas, encontro_cadaver, 
+                          encontro_ossada, registro_ocorrencias, fase, mes_ano, lesao_corp_culposa, 
+                          hom_culposo, pol_civis_mortos_serv, pol_militares_mortos_serv)) %>% 
+  filter(ano<2023 & ano>2017)
+
+crimesRJ <- rowsum.data.frame(basecrimesRJ2[ , 5:31], basecrimesRJ2$fmun) %>% 
+  mutate(municipios = row.names(.)) %>% 
+  select(municipios, everything())
+row.names(crimesRJ) <- NULL
+crimesRJ_int_compl <- crimesRJ %>% filter(municipios != "Rio de Janeiro")
+
+# ANÁLISE FATORIAL POR COMPONENTES PRINCIPAIS  ----------------------------
+
+rho_pc1 <- Hmisc::rcorr(as.matrix(crimesRJ_int_compl[,2:28]), type="pearson")
+corr_coef_pc1 <- rho_pc1$r 
+corr_coef_pc1
+corr_sig_pc1 <- round(rho_pc1$P, 5)
+
+plotly::ggplotly(
+  crimesRJ_int_compl[,2:28] %>%
+    cor() %>%
+    melt() %>%
+    rename(Correlação = value) %>%
+    ggplot() +
+    geom_tile(aes(x = Var1, y = Var2, fill = Correlação)) +
+    geom_text(aes(x = Var1, y = Var2, label = format(round(Correlação,3))),
+              size = 3) +
+    scale_fill_viridis_b(option = "C") +
+    labs(x = NULL, y = NULL) +
+    theme_bw(base_size = 10))
+
+##depois preciso testar uma nova análise sem essas variáveis com baixa correlação, e.g., 'trafico de drogas', 'roubo a banco'
+
+teste_bartlett_pc1 <- cortest.bartlett(crimesRJ_int_compl[ ,2:28])
+teste_bartlett_pc1$p.value
+
+KMO_A <- KMO(crimesRJ_int_compl[ ,2:28])  
+KMO_A
+
+
+# ANÁLISE FATORIAL POR COMPONENTES PRINCIPAIS_pc2 -------------------------
+
+#análise: utilizando a base 'crimesRJ_int_compl', com 91x28
+
+
+PCA_CRIMES_RJ <- principal(crimesRJ_int_compl[,2:28],
+                          nfactors = length(crimesRJ_int_compl[,2:28]),
+                          rotate = "none",
+                          scores = TRUE)
+PCA_CRIMES_RJ
+
+eigenvalues <- round(PCA_CRIMES_RJ$values, 5)
+eigenvalues
+round(sum(eigenvalues), 2)
+
+variancia_compartilhada <- as.data.frame(PCA_CRIMES_RJ$Vaccounted) %>% 
+  slice(1:3)
+
+rownames(variancia_compartilhada) <- c("Autovalores",
+                                           "Prop. da Variância",
+                                           "Prop. da Variância Acumulada")
+
+round(variancia_compartilhada, 3) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                font_size = 20)
+
+k <- sum(eigenvalues > 1)
+print(k)
+
+PCA_CRIMES_RJ <- principal(crimesRJ_int_compl[,2:28],
+                          nfactors = k,
+                          rotate = "none",
+                          scores = TRUE)
+PCA_CRIMES_RJ
+
+scores_PCA_CRIMES_RJ <- as.data.frame(unclass(PCA_CRIMES_RJ$weights))
+
+round(scores_PCA_CRIMES_RJ, 3) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                font_size = 20)
+
+fatores_PCA_CRIMES_RJ <- as.data.frame(PCA_CRIMES_RJ$scores)
+View(fatores_PCA_CRIMES_RJ)
+
+
+cargas_PCA_CRIMES_RJ <- as.data.frame(unclass(PCA_CRIMES_RJ$loadings)) ## aqui bugou: por que algumas cargas não aparecem?
+cargas_PCA_CRIMES_RJ$variaveis <- row.names(cargas_PCA_CRIMES_RJ)
+cargas_PCA_CRIMES_RJ <- cargas_PCA_CRIMES_RJ %>% select(variaveis, 1,2)
+
+round(cargas_PCA_CRIMES_RJ[,2:3], 3) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                font_size = 20)
+
+PCA_CRIMES_RJ$communality
+comunalidades_PCA_CRIMES_RJ <- as.data.frame(unclass(PCA_CRIMES_RJ$communality)) %>%
+  rename(comunalidades = 1) ## aqui mostra o quanto das variáveis originais está captado pelos fatores extraídos
+
+comunalidades_PCA_CRIMES_RJ <- comunalidades_PCA_CRIMES_RJ %>% mutate(
+  variaveis = row.names(comunalidades_PCA_CRIMES_RJ)
+) %>%
+  select(variaveis, everything())
+
+round(comunalidades_PCA_CRIMES_RJ[2], 3) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped",
+                full_width = FALSE,
+                font_size = 20)
+
+cargas_PCA_CRIMES_RJ[, 2:3] %>%
+  data.frame() %>%
+  rownames_to_column("variáveis") %>%
+  ggplot(aes(x = PC1, y = PC2, label = variáveis)) +
+  geom_point(color = "#4472C4",
+             size = 3) +
+  geom_text_repel() +
+  geom_vline(aes(xintercept = 0), linetype = "dashed", color = "gold2") +
+  geom_hline(aes(yintercept = 0), linetype = "dashed", color = "gold2") +
+  expand_limits(x= c(-1.25, 0.25), y=c(-0.25, 1)) +
+  theme_bw()
+
+crimesRJ_int_compl <- crimesRJ_int_compl %>% mutate(
+  fator_pc1 = fatores_PCA_CRIMES_RJ$PC1,
+  fator_pc2 = fatores_PCA_CRIMES_RJ$PC2
+)
+
+indice_criminalidade <- (fatores_PCA_CRIMES_RJ$PC1 * variancia_compartilhada$PC1[2]) + (fatores_PCA_CRIMES_RJ$PC2 * variancia_compartilhada$PC2[2])
+
+crimesRJ_int_compl$indice_criminal <- indice_criminalidade
+crimesRJ_int_compl <- crimesRJ_int_compl %>% select(1,29,30,31, everything()) ## essa tabela deve ficar para o anexo!!
+
+crimesRJ_int_compl_B <- crimesRJ_int_compl %>% select(municipios, indice_criminal, everything())
+
+ranking_de_crim_interiorRJ <- crimesRJ_int_compl_B %>% mutate(
+  ranking = min_rank(desc(crimesRJ_int_compl$indice_criminal)),  
+  risco = case_when(
+    indice_criminal >= quantile(indice_criminal, 0.75) ~ "alto",
+    indice_criminal >= quantile(indice_criminal, 0.25) ~ "médio",
+    indice_criminal < quantile(indice_criminal, 0.25) ~ "baixo")) %>%  
+  arrange(ranking) %>% 
+  select(ranking, municipios, risco, everything())
+
+
+
+
+## Outra função para o K-means
+## primeiro é preciso descobrir quantos centroides serão formados:
+
+
+
+## variáveis originais
+
+
+set.seed(123)
+var_originais <- kmeans(base_crimesRJ_interior[,8:34], 4, nstart=25)
+print(km.res)
+
+aggregate(base_crimesRJ_interior[,8:34], by=list(cluster=var_originais$cluster), mean)
+base_crimesRJ_interior$cluster_K3 <- var_originais$cluster
+
+fviz_cluster(var_originais, data=base_crimesRJ_interior[,8:34],
+             palette = c("#00509d", "gold2", "#3f7d20", "#540b0e", "#9e2a2b", "#7f7979"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+km.res$centers
+km.res$cluster
+km.res$size
+
+
+##Variáveis após PCA
+
+set.seed(123)
+an_grup <- kmeans(base_crimesRJ_interior[,5:6], 4, nstart=25)
+print(an_grup)
+
+aggregate(an_grup, by=list(cluster=km.res$cluster), mean)
+df_an_grup <- cbind(base_crimesRJ_interior, clusterX=km.res$cluster)
+
+plot <- fviz_cluster(an_grup, data=base_crimesRJ_interior[,5:6],
+             palette = c("#00509d", "gold2", "#3f7d20", "#540b0e", "#9e2a2b", "#7f7979"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+
+
+###tabelas
+
+table(base_crimesRJ_interior$risco, base_crimesRJ_interior$cluster_K2)
+table(base_crimesRJ_interior$risco, base_crimesRJ_interior$cluster_K3)
+
+
+# 2. Análise de agrupamentos -------------------------------------------------
+
+# 2.1 avaliar quantos agrupamentos formar:
+
+fviz_nbclust(as.data.frame(scale(base_crimesRJ_interior[,8:34])), kmeans, method = "wss", k.max = 10, linecolor = "#3f7d20") +
+  geom_vline(xintercept = 4, linetype = 2) +
+  labs(title = "Quantidade ótima de agrupamentos")+
+  xlab("número de grupos") +
+  ylab("soma dos quadrados interna")
+   
+  
+
+#Método hierárquico usando os fatores extraídos no encademaento completo
+
+matriz_D <- base_crimesRJ_interior %>% 
+  select(5:6) %>% 
+  dist(method = "euclidean")
+
+cluster_hier <- agnes(x = matriz_D, method = "complete")
+
+coeficientes <- sort(cluster_hier$height, decreasing = FALSE) 
+coeficientes
+
+esquema <- as.data.frame(cbind(cluster_hier$merge, coeficientes))
+names(esquema) <- c("Cluster1", "Cluster2", "Coeficientes")
+esquema
+
+fviz_dend(x = cluster_hier,
+          k = 4,
+          k_colors = c("#00509d", "gold2", "#3f7d20", "#7f7979"),
+          color_labels_by_k = F,
+          rect = T,
+          rect_fill = T,
+          main = "agrupamento hierárquico com as variáveis originais - encadeamento completo",
+          xlab = "observações (municípios do hancking)",
+          ylab = "pontos de formação dos aglomerados",
+          lwd = 1,
+          ggtheme = theme_bw())
+
+#levar os aglomerados do método hierárquico para a base de dados:
+
+base_crimesRJ_interior <- base_crimesRJ_interior %>% mutate(
+  cluster_H = factor(cutree(tree = cluster_hier, k = 4))
+) %>% 
+  select(1:6, cluster_h, everything())
+
+# NOVA ANÁLISE DE CLUSTER -------------------------------------------------
+
+## refazer a análise calculando os aglomerados usando as variáveis originais 
+## PADRONIZADAS mas plotando em relação aos fatores extraídos, depois comparar 
+## com a avaliação de risco feita a partir de medidas de posição do 
+## índice de criminalidade
+
+cluster_crimes <- kmeans(base_crimesRJ_interior[ ,5:6],
+                          centers = 4)
+
+
+base_crimesRJ_interior$cluster_K <- factor(cluster_crimes$cluster)
+
+plot_artigo <- fviz_cluster(cluster_crimes, data=base_crimesRJ_interior[ ,9:34],
+                            palette = c("#00509d", "gold2", "#3f7d20", "#540b0e", "#9e2a2b", "#7f7979"),
+                            ellipse.type="euclid",
+                            star.plot=TRUE,
+                            repel=TRUE,
+                            ggtheme=theme_minimal())
+
+plot_artigo
+
+## outra forma de visualizar os agrupamentos k-means
+
+base_crimesRJ_interior %>%
+  group_by(cluster_K) %>%
+  mutate(crim_medio = mean(indice_criminal, na.rm = TRUE)) %>%
+  mutate(rotulo = paste(municipios, indice_criminal)) %>%
+  ggplot(aes(x = as.numeric(cluster_K), y = indice_criminal, label = rotulo)) +
+  geom_point(aes(x = cluster_K , y = indice_criminal), color = "#4472C4", alpha = 0.5, size = 5) +
+  geom_line(aes(x = cluster_K, y = crim_medio, 
+                group = 1, color = "média"), linewidth = 0.5) +
+  scale_color_manual("Legenda:", values = "gold2") +
+  labs(x = "grupos formados por K-means",
+       y = "Índice de criminalidade") +
+  geom_text_repel(box.padding = 0.5, max.overlaps = 30) +  ##aqui controla os nomes sobrepostos
+  theme_light() +
+  theme(legend.position = "bottom") +
+  theme(axis.text.x = element_text(angle = 0, vjust = .5, size = 12),
+        legend.text = element_text(angle = 0, vjust = .5, size = 12))
+
+
+## calcular as descritivas dos agrupamentos criados nos dois métodos:
+
+agrupamentos_Kmeans <- as.data.frame(base_crimesRJ_interior %>% group_by(cluster_K) %>% summarise(qtde_mun = n(), 
+                                                                                               media = mean(indice_criminal),
+                                                                                               desv_pad = sd(indice_criminal),
+                                                                                               mediana = median(indice_criminal),
+                                                                                               min = min(indice_criminal),
+                                                                                               max = max(indice_criminal)))
+
+agrupamentos_Hierarq <- as.data.frame(base_crimesRJ_interior %>% group_by(cluster_H) %>% summarise(qtde_mun = n(), 
+                                                                                                media = mean(indice_criminal),
+                                                                                                desv_pad = sd(indice_criminal),
+                                                                                                mediana = median(indice_criminal),
+                                                                                                min = min(indice_criminal),
+                                                                                                max = max(indice_criminal)))
+
+
+## esse 'table' mostra que está batendo com o gráfico e a diferença entre o gráfico com os fatores e as variáveis originais padronizadas
+## é irrelevante. Quero ver com as variáveis sem padronização. MAs acho que será a mesma coisa
+
+table(base_crimesRJ_interior$cluster_K, base_crimesRJ_interior$cluster_H)
+table(base_crimesRJ_interior$cluster_K, base_crimesRJ_interior$risco)
+table(base_crimesRJ_interior$cluster_H, base_crimesRJ_interior$risco)
